@@ -1,0 +1,23 @@
+{application, spreadbot_auth,
+ [{description, "Spreadbot authentication application"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {mod, { spreadbot_auth_app, []}},
+  {applications,
+   [kernel,
+    stdlib,
+    inets,
+    crypto,
+    cowboy,
+    lager,
+    jwt,
+    jsx
+   ]},
+  {env,[]},
+  {modules, []},
+
+  {maintainers, ["Spreadbot"]},
+  {licenses, ["MIT"]},
+  {links, ["Github",
+           "https://github.com/spreadbot/spreadbot_auth"]}
+ ]}.

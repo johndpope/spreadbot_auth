@@ -1,0 +1,6 @@
+-sname spreadbot_auth
+
+-setcookie spreadbot_auth_cookie
+
++K true
++A30
