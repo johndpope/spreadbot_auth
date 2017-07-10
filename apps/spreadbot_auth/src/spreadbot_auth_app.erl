@@ -15,18 +15,18 @@
 %%====================================================================
 
 start(_StartType, _StartArgs) ->
-	ets:new(blacklisted_refresh_tokens, [set, named_table, public]),
-    Dispatch = cowboy_router:compile([
-    	{'_', [
-        {"/auth/tokens", request_handler, []},
-        {"/blacklists/tokens", request_handler, []}
-    	]}
+  Dispatch = cowboy_router:compile([
+    {'_', [
+      {"/auth/tokens", request_handler, []},
+      {"/blacklists/tokens", request_handler, []}
+    ]}
 	]),
-    {ok, _} = cowboy:start_clear(spreadbot_auth_listener,
-      [{port, 8080}],
-      #{env => #{dispatch => Dispatch}}
-    ),
-    spreadbot_auth_sup:start_link().
+  {ok, _} = cowboy:start_clear(spreadbot_auth_listener,
+    [{port, 8080}],
+    #{env => #{dispatch => Dispatch}}
+  ),
+  ets:new(blacklisted_refresh_tokens, [set, named_table, public]),
+  spreadbot_auth_sup:start_link().
 
 %%--------------------------------------------------------------------
 stop(_State) ->
@@ -43,6 +43,8 @@ stop(_State) ->
 -ifdef(TEST).
 
 before_tests() ->
+    application:start(compiler),
+    application:start(syntax_tools),
     application:start(goldrush),
     application:start(lager),
     application:start(cowlib),
@@ -53,6 +55,7 @@ before_tests() ->
     application:start(base64url),
     application:start(jwt),
     application:start(spreadbot_auth_app),
+    ets:new(blacklisted_refresh_tokens, [set, named_table, public]),
     ok.
 
 after_tests() ->
@@ -81,43 +84,42 @@ spreadbot_auth_app_test() ->
   {ok, Token} = jwt:encode(<<"HS256">>, [{iss, Iss} | Claims], ExpiresIn, Key),
   {ok, BlacklistedToken} = jwt:encode(<<"HS256">>, [{iss, Iss} | Claims], ExpiresIn, Key),
 
-  %% bad request - refresh_access_token
-  ?assertEqual(400, os:cmd("cd apps/spreadbot_auth/test && ./post_no_refresh_token.sh")),
+  % bad request - refresh_access_token
+  ?assertEqual("400", os:cmd("cd apps/spreadbot_auth/test && ./post_no_refresh_token.sh")),
 
   %% unauthorized - refresh_access_token
-  ?assertEqual(401, os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token_no_auth.sh &&" 
+  ?assertEqual("401", os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token_no_auth.sh " 
     ++ binary_to_list(Token))),
 
   %% blacklisted refresh token - refresh_access_token
   ets:insert(blacklisted_refresh_tokens, [{BlacklistedToken}]),
-  ?assertEqual(400, os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token.sh" 
+  ?assertEqual("400", os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token.sh " 
     ++ binary_to_list(BlacklistedToken))),
 
   %% expired refresh token - refresh_access_token
-  ?assertEqual(400, os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token.sh" 
+  ?assertEqual("400", os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token.sh " 
     ++ binary_to_list(ExpToken))),
 
   %% success - refresh_access_token
-  ?assertEqual(200, os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token.sh" 
-    ++ binary_to_list(Token))),
+  ?assertEqual("200", os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token.sh " ++ binary_to_list(Token))),
 
   {ok, Token2} = jwt:encode(<<"HS256">>, [{iss, Iss} | Claims], ExpiresIn, Key),
   {ok, BlacklistedToken2} = jwt:encode(<<"HS256">>, [{iss, Iss} | Claims], ExpiresIn, Key),
 
   %% bad request - revoke_refresh_token
-  ?assertEqual(400, os:cmd("cd apps/spreadbot_auth/test && ./post_no_revoke_token.sh")),
+  ?assertEqual("400", os:cmd("cd apps/spreadbot_auth/test && ./post_no_revoke_token.sh")),
 
   %% unauthorized - revoke_refresh_token
-  ?assertEqual(401, os:cmd("cd apps/spreadbot_auth/test && ./post_revoke_token_no_auth.sh" 
+  ?assertEqual("401", os:cmd("cd apps/spreadbot_auth/test && ./post_revoke_token_no_auth.sh "
     ++ binary_to_list(Token2))),
 
   %% blacklisted - revoke_refresh_token
   ets:insert(blacklisted_refresh_tokens, [{BlacklistedToken2}]),
-  ?assertEqual(200, os:cmd("cd apps/spreadbot_auth/test && ./post_revoke_token.sh" 
+  ?assertEqual("200", os:cmd("cd apps/spreadbot_auth/test && ./post_revoke_token.sh "
     ++ binary_to_list(BlacklistedToken2))),
 
   %% success - revoke_refresh_token
-  ?assertEqual(200, os:cmd("cd apps/spreadbot_auth/test && ./post_revoke_token.sh" 
+  ?assertEqual("200", os:cmd("cd apps/spreadbot_auth/test && ./post_revoke_token.sh "
     ++ binary_to_list(Token2))).
 
 -endif.

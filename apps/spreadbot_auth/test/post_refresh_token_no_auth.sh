@@ -1,4 +1,2 @@
 #!/bin/sh
-echo "Running test on $OSTYPE"
-
-curl http://localhost:8080/auth/tokens -H "Content-Type: application/json" -X POST  -d 'refresh_token=$1'
+curl -s -o /dev/null -w "%{http_code}" -X POST -H "Content-Type: application/json" -H "Authorization: Basic $baisc_auth" -d '{"refresh_token":"$1"}' http://localhost:8080/auth/tokens
