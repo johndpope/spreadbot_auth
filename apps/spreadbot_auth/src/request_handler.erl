@@ -17,13 +17,13 @@
 %%====================================================================
 
 init(Req, State) ->
-    Path = cowboy_req:path_info(Req),
-    Method = cowboy_req:method(Req),
-    HasBody = cowboy_req:has_body(Req),
-    maybe_process(Req, State, Method, Path, HasBody).
+  Path = cowboy_req:path(Req),
+  Method = cowboy_req:method(Req),
+  HasBody = cowboy_req:has_body(Req),
+  maybe_process(Req, State, Method, Path, HasBody).
 
 terminate(_Reason, _Req, _State) ->
-    ok.
+  ok.
 
 %%====================================================================
 %% Internal functions
@@ -39,51 +39,54 @@ maybe_process(Req, State, <<"POST">>, Path, true) ->
         unauthorized(Req, State)
       end;
 maybe_process(Req, State, <<"POST">>, _, false) ->
-    {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Missing body\"}">>, Req), State};
+  {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Missing body\"}">>, Req), State};
 maybe_process(Req, State, <<"OPTIONS">>, _, _) ->
-    {ok, cowboy_req:reply(200, #{
-        <<"content-type">> => <<"application/json">>,
-        <<"access-control-allow-origin">> => <<"*">>,
-        <<"access-control-allow-headers">> => <<"authorization">>,
-        <<"access-control-allow-method">> => <<"POST">>
-    } , <<>>, Req), State};
+  {ok, cowboy_req:reply(200, #{
+    <<"content-type">> => <<"application/json">>,
+    <<"access-control-allow-origin">> => <<"*">>,
+    <<"access-control-allow-headers">> => <<"authorization">>,
+    <<"access-control-allow-method">> => <<"POST">>
+  }, <<>>, Req), State};
 maybe_process(Req, State, _, _, _) ->
-    %% Method not allowed.
-    {ok, cowboy_req:reply(405, Req), State}.
+  %% Method not allowed.
+  {ok, cowboy_req:reply(405, Req), State}.
 
 %% Processing POST requests.
 process_post(Req, State, Path) ->
   Date = get_date(Req),
-  lager:info("~p POST req recvd, Date ~p: ~p", [self(), Date, Path]),
+  lager:info("~p POST req: ~p, Date: ~p", [self(), Path, Date]),
   {ok, TokenPayload, _Req2} = cowboy_req:read_body(Req),
   case jsx:is_json(TokenPayload) of
     true ->
       case jsx:decode(TokenPayload) of
         [{<<"refresh_token">>, RefreshToken}] ->
-          lager:info("RefreshToken  ~p", [RefreshToken]),
-          case cowboy_req:path(Req) of
-            <<"/auth/tokens">> ->
-              lager:info("PATH /auth/tokens"),
-              case spreadbot_auth:refresh_access_token(RefreshToken) of
-                {ok, Resp} ->
-                  lager:info("RESP 200 - Token refreshed"),
-                  {ok, cowboy_req:reply(200, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, jsx:encode([Resp]), Req), State};
-                {error, Error} ->
-                  lager:info("RESP Error - Token NOT refreshed ~p", [Error]),
-                  {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Invalid token\"}">>, Req), State}
-                end;
-            <<"/blacklists/tokens">> ->
-              lager:info("PATH /blacklists/tokens"),
-              ok = spreadbot_auth:revoke_refresh_token(RefreshToken),
-              lager:info("RESP 200 - Token blacklisted"),
-              {ok, cowboy_req:reply(200, Req), State}
-            end;
+          router(Req, State, RefreshToken);
         _ ->
+          lager:info("Missing parameters"),
           {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Missing parameters\"}">>, Req), State}
         end;
     false ->
+      lager:info("Malformed request"),
       {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Malformed request\"}">>, Req), State}
     end.
+
+router(Req, State, RefreshToken) ->
+  lager:info("RefreshToken  ~p", [RefreshToken]),
+    case cowboy_req:path(Req) of
+      <<"/auth/tokens">> ->
+        case spreadbot_auth:refresh_access_token(RefreshToken) of
+          {ok, Resp} ->
+            lager:info("RESP 200 - Token refreshed"),
+            {ok, cowboy_req:reply(200, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, jsx:encode([Resp]), Req), State};
+          {error, Error} ->
+            lager:info("RESP Error - Token NOT refreshed ~p", [Error]),
+            {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Invalid token\"}">>, Req), State}
+          end;
+      <<"/blacklists/tokens">> ->
+        ok = spreadbot_auth:revoke_refresh_token(RefreshToken),
+        lager:info("RESP 200 - Token blacklisted"),
+        {ok, cowboy_req:reply(200, Req), State}
+      end.
 
 credentials(Req) ->
   AuthorizationHeader = cowboy_req:header(<<"authorization">>, Req),

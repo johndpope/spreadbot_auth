@@ -40,9 +40,14 @@ refresh_access_token(RefreshToken) ->
       {error, invalid_token};
     {ok, Claims} ->
       {ok, ExpiryAbsolute} = get(Claims, <<"exp">>),
-      case binary_to_integer(ExpiryAbsolute) > seconds_since_epoch(0) of
+      lager:info("ExpiryAbsolute: ~p", [ExpiryAbsolute]),
+      case ExpiryAbsolute > seconds_since_epoch(0) of
         true ->
-			    {ok, AccessToken} = spreadbot_auth_jwt:issue_token(?TOKEN_EXPIRY_TIME, Claims),
+          {ok, Uid} = get(Claims, <<"uid">>),
+          {ok, Iss} = get(Claims, <<"iss">>),
+          NewClaims = [{uid, Uid}, {iss, Iss}],
+			    {ok, AccessToken} = spreadbot_auth_jwt:issue_token(?TOKEN_EXPIRY_TIME, NewClaims),
+          lager:info("AccessToken: ~p", [AccessToken]),
     			Resp = #response{
             access_token = AccessToken, 
             expires_in = ?TOKEN_EXPIRY_TIME, 

@@ -22,11 +22,10 @@ resolve_refresh_token(RefreshToken) ->
       case {application:get_env(spreadbot_auth, jwt_key), application:get_env(spreadbot_auth, jwt_iss)} of
 				{undefined, undefined} ->
           lager:info("ERROR - JWT creds not set."),
-        	{error, invalid_key};
+          {error, invalid_token};
         {{ok, IssuerKey}, {ok, Issuer}} ->
         	case decode_jwt(RefreshToken, IssuerKey, Issuer) of
         		{ok, Claims} ->
-              lager:info("Claims ~p", [Claims]),
         			{ok, Claims};
         		{error, Error} ->
               lager:info("ERROR ~p", [Error]),
@@ -39,7 +38,7 @@ resolve_refresh_token(RefreshToken) ->
     end.
 
 %% Generates a new JWT.
--spec issue_token(spreadbot_auth:lifetime(), map()) -> {ok, binary()}.
+-spec issue_token(spreadbot_auth:lifetime(), any()) -> {ok, binary()}.
 issue_token(ExpiresIn, Claims) ->
 	{ok, IssuerKey} = application:get_env(spreadbot_auth, jwt_key),
 	{ok, AccessToken} = jwt:encode(<<"HS256">>, Claims, ExpiresIn, IssuerKey),
@@ -97,8 +96,8 @@ decode_jwt(RefreshToken, IssuerKey, Issuer) ->
 -ifdef(TEST).
 
 before_tests() ->
-  % ets:new(blacklisted_refresh_tokens, [set, named_table, public]),
   application:start(crypto),
+  % ets:new(blacklisted_refresh_tokens, [set, named_table, public]),
   ok.
 
 after_tests() ->
@@ -118,37 +117,45 @@ resolve_refresh_token_test() ->
 
   application:set_env(spreadbot_auth, jwt_key, Key),
   application:set_env(spreadbot_auth, jwt_iss, Iss),
+
+  application:start(crypto),
   
-  Claims = [{uid, Uid}],
+  Claims = [{uid, Uid}, {iss, Iss}],
   ExpiresIn = 86400,
 
-  {ok, Token} = jwt:encode(<<"HS256">>, Claims, ExpiresIn, Key),
+  % bad_issuer
+  {ok, Token} = jwt:encode(<<"HS256">>, [{uid, Uid}], ExpiresIn, Key),
   ?assertEqual(resolve_refresh_token(Token), {error, bad_issuer}),
 
-  ?assertEqual(resolve_refresh_token(Key), {error, invalid_token}),
+  % no_uid
+  {ok, Token2} = jwt:encode(<<"HS256">>, [{iss, Iss}], ExpiresIn, Key),
+  ?assertEqual(resolve_refresh_token(Token2), {error, no_uid}),
 
-  {ok, Token2} = jwt:encode(<<"HS256">>, [{iss, Iss} | Claims], ExpiresIn, Key),
-  ets:insert(blacklisted_refresh_tokens, [{Token2}]),
-	?assertEqual(resolve_refresh_token(Token2), {error, invalid_token}),
+  % success
+  Uid2 = <<"tester@test.com">>,
+  Claims2 = [{uid, Uid2}, {iss, Iss}],
+  {ok, Token3} = jwt:encode(<<"HS256">>, Claims2, ExpiresIn, Key),
+  ?assertMatch({ok, _}, issue_token(ExpiresIn, Claims)),
 
-  {ok, Token3} = jwt:encode(<<"HS256">>, [{iss, Iss} | Claims], ExpiresIn, Key),
-  % ?assertEqual(resolve_refresh_token(Token3), {ok,#{<<"exp">> => ExpiresIn,<<"iss">> => Iss, <<"uid">> => Uid}}),
+  % blacklisted token
+  {ok, Token4} = jwt:encode(<<"HS256">>, Claims, ExpiresIn, Key),
+  ets:insert(blacklisted_refresh_tokens, [{Token4}]),
+  ?assertEqual(resolve_refresh_token(Token4), {error, invalid_token}).
 
-  {ok, Token4} = jwt:encode(<<"HS256">>, [{iss, Iss}], ExpiresIn, Key),
-  ?assertEqual(resolve_refresh_token(Token4), {error, no_uid}). 
+issue_token_test() ->
+	Iss = <<"test inc.">>,
+  Key = <<"53F61451CAD6231FDCF6859C6D5B88C1EBD5DC38B9F7EBD990FADD4EB8EB9063">>,
+  Uid = <<"tester@test.com">>,
 
-% issue_token_test() ->
-% 	Iss = <<"test inc.">>,
-%   Key = <<"53F61451CAD6231FDCF6859C6D5B88C1EBD5DC38B9F7EBD990FADD4EB8EB9063">>,
-%   Uid = <<"tester@test.com">>,
+  application:set_env(spreadbot_auth, jwt_key, Key),
+  application:set_env(spreadbot_auth, jwt_iss, Iss),
 
-%   application:set_env(spreadbot_auth, jwt_key, Key),
-%   application:set_env(spreadbot_auth, jwt_iss, Iss),
+  application:start(crypto),
 
-%   Claims = [{uid, Uid}],
-%   ExpiresIn = 86400,
+  Claims = [{uid, Uid}, {iss, Iss}],
+  ExpiresIn = 86400,
 
-%   ?assertEqual(issue_token(ExpiresIn, Claims), {ok, "fix me"}).
+  ?assertMatch({ok, _}, issue_token(ExpiresIn, Claims)).
 
 blacklist_refresh_token_test() ->
 	Iss = <<"test inc.">>,
@@ -158,7 +165,9 @@ blacklist_refresh_token_test() ->
   application:set_env(spreadbot_auth, jwt_key, Key),
   application:set_env(spreadbot_auth, jwt_iss, Iss),
 
-  Claims = [{uid, Uid}],
+  application:start(crypto),
+
+  Claims = [{uid, Uid}, {iss, Iss}],
   ExpiresIn = 86400,
 
   {ok, Token} = jwt:encode(<<"HS256">>, Claims, ExpiresIn, Key),
