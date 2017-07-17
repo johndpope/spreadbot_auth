@@ -2,42 +2,59 @@
 
 %% Application callbacks
 -export([init/2]).
--export([allowed_methods/2]).
--export([is_authorized/2]).
--export([content_types_provided/2]).
--export([content_types_accepted/2]).
--export([router/2]).
+-export([terminate/3]).
 
 -define(USERNAME, <<"admin">>).
 -define(PASSWORD, <<"password">>).
+
+%% Tests
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
 
 %%====================================================================
 %% API functions
 %%====================================================================
 
-init(Req, Opts) ->
-  {cowboy_rest, Req, Opts}.
+init(Req, State) ->
+    Path = cowboy_req:path_info(Req),
+    Method = cowboy_req:method(Req),
+    HasBody = cowboy_req:has_body(Req),
+    maybe_process(Req, State, Method, Path, HasBody).
 
-allowed_methods(Req, State) ->
-  {[<<"POST">>], Req, State}.
+terminate(_Reason, _Req, _State) ->
+    ok.
 
-is_authorized(Req, State) ->
+%%====================================================================
+%% Internal functions
+%%====================================================================
+
+maybe_process(Req, State, <<"POST">>, Path, true) ->
   {Username, Password, Req} = credentials(Req),
     case {Username, Password} of
       {?USERNAME, ?PASSWORD} ->
-        authorized(Req, State);
+        lager:info("Access granted"),
+        process_post(Req, State, Path);
       _ ->
         unauthorized(Req, State)
-      end.
+      end;
+maybe_process(Req, State, <<"POST">>, _, false) ->
+    {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Missing body\"}">>, Req), State};
+maybe_process(Req, State, <<"OPTIONS">>, _, _) ->
+    {ok, cowboy_req:reply(200, #{
+        <<"content-type">> => <<"application/json">>,
+        <<"access-control-allow-origin">> => <<"*">>,
+        <<"access-control-allow-headers">> => <<"authorization">>,
+        <<"access-control-allow-method">> => <<"POST">>
+    } , <<>>, Req), State};
+maybe_process(Req, State, _, _, _) ->
+    %% Method not allowed.
+    {ok, cowboy_req:reply(405, Req), State}.
 
-content_types_provided(Req, State) ->
-	{[{<<"application/json">>, router}], Req, State}.
-
-content_types_accepted(Req, State) ->
-  {[{<<"application/json">>, router}], Req, State}.
-
-router(Req, _Opts) ->
-  lager:info("~p POST req recvd - Date ~p", [self(), get_date(Req)]),
+%% Processing POST requests.
+process_post(Req, State, Path) ->
+  Date = get_date(Req),
+  lager:info("~p POST req recvd, Date ~p: ~p", [self(), Date, Path]),
   {ok, TokenPayload, _Req2} = cowboy_req:read_body(Req),
   case jsx:is_json(TokenPayload) of
     true ->
@@ -50,35 +67,23 @@ router(Req, _Opts) ->
               case spreadbot_auth:refresh_access_token(RefreshToken) of
                 {ok, Resp} ->
                   lager:info("RESP 200 - Token refreshed"),
-                  % To Do
-                  cowboy_req:reply(200, #{
-                    <<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, 
-                    <<"[\"a\",\"list\",\"of\",\"words\"]">>, Req);
+                  {ok, cowboy_req:reply(200, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, jsx:encode([Resp]), Req), State};
                 {error, Error} ->
                   lager:info("RESP Error - Token NOT refreshed ~p", [Error]),
-                  cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, 
-                    <<"access-control-allow-origin">> => <<"*">>}, <<"[\"Invalid Token\"]">>, Req)
+                  {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Invalid token\"}">>, Req), State}
                 end;
             <<"/blacklists/tokens">> ->
               lager:info("PATH /blacklists/tokens"),
               ok = spreadbot_auth:revoke_refresh_token(RefreshToken),
               lager:info("RESP 200 - Token blacklisted"),
-              cowboy_req:reply(200, Req)
+              {ok, cowboy_req:reply(200, Req), State}
             end;
         _ ->
-          cowboy_req:reply(400, #{
-            <<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, 
-            <<"[\"Missing parameters\"]">>, Req)
+          {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Missing parameters\"}">>, Req), State}
         end;
-      false ->
-        cowboy_req:reply(400, #{
-          <<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, 
-          <<"[\"Malformed request\"]">>, Req)
+    false ->
+      {ok, cowboy_req:reply(400, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Malformed request\"}">>, Req), State}
     end.
-    
-%%====================================================================
-%% Internal functions
-%%====================================================================
 
 credentials(Req) ->
   AuthorizationHeader = cowboy_req:header(<<"authorization">>, Req),
@@ -109,11 +114,7 @@ decoded_credentials(EncodedCredentials) ->
 
 unauthorized(Req, State) ->
   lager:info("Access denied, refusing it"),
-  {{false, <<"Basic realm=\"cowboy\"">>}, Req, State}.
-
-authorized(Req, State) ->
-  lager:info("Access granted"),
-  {true, Req, State}.
+  {ok, cowboy_req:reply(401, #{<<"content-type">> => <<"application/json">>, <<"access-control-allow-origin">> => <<"*">>}, <<"{\"error\": \"Unauthenticated requests cannot POST\"}">>, Req), State}.
 
 get_date(Req) ->
   case cowboy_req:header(<<"etag">>, Req) of

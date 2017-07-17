@@ -43,20 +43,17 @@ stop(_State) ->
 -ifdef(TEST).
 
 before_tests() ->
-    application:start(compiler),
-    application:start(syntax_tools),
-    application:start(goldrush),
-    application:start(lager),
-    application:start(cowlib),
-    application:start(ranch),
-    application:start(lager),
-    application:start(cowboy),
-    application:start(jsx),
-    application:start(base64url),
-    application:start(jwt),
-    application:start(spreadbot_auth_app),
-    ets:new(blacklisted_refresh_tokens, [set, named_table, public]),
-    ok.
+  application:start(base64url),
+  application:start(cowboy),
+  application:start(cowlib),
+  application:start(goldrush),
+  application:start(jsx),
+  application:start(jwt),
+  application:start(lager),
+  application:start(ranch),    
+  application:start(spreadbot_auth_app),
+  ets:new(blacklisted_refresh_tokens, [set, named_table, public]),
+  ok.
 
 after_tests() ->
     ok.
@@ -100,7 +97,7 @@ spreadbot_auth_app_test() ->
   ?assertEqual("400", os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token.sh " 
     ++ binary_to_list(ExpToken))),
 
-  %% success - refresh_access_token
+  % success - refresh_access_token
   ?assertEqual("200", os:cmd("cd apps/spreadbot_auth/test && ./post_refresh_token.sh " ++ binary_to_list(Token))),
 
   {ok, Token2} = jwt:encode(<<"HS256">>, [{iss, Iss} | Claims], ExpiresIn, Key),

@@ -8,6 +8,11 @@
 -define(TOKEN_TYPE, <<"bearer">>).
 -define(TOKEN_EXPIRY_TIME, 3600). %% 1 hour
 
+%% Tests
+-ifdef(TEST).
+-include_lib("eunit/include/eunit.hrl").
+-endif.
+
 %% Records
 -record(response, {	access_token             :: binary(),
 					          expires_in               :: lifetime(),
